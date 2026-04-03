@@ -39,7 +39,6 @@ HRESULT pdf2bitmap(PDF2BITMAP_DATA* data, const WCHAR *pdf_filename, HBITMAP *ph
     PVOID pView = NULL;
     HRESULT hr;
     size_t pdf_size;
-    INT bitmap_width, bitmap_height;
 
     *phBitmap = NULL;
     data->page_count = 0;

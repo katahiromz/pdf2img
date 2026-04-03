@@ -11,7 +11,7 @@ project(pdf2img VERSION 1.0 LANGUAGES C)
 add_definitions(-DPDF2IMG_VERSION="${pdf2img_VERSION}")
 
 # Don't use DPI?
-set(GDIPM_NO_DPI ON)
+set(GDIPM_NO_DPI OFF)
 
 # "Don't make test program?" Option
 option(PDF2IMG_NO_TESTS "Don't create test programs" ON)
