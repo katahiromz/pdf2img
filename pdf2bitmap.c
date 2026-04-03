@@ -4,14 +4,8 @@
 
 #include <windows.h>
 #include <stdio.h>
-#include "pdf_load.h"
 #include "gdipm.h"
-
-typedef struct PDF2BITMAP_DATA
-{
-    PdfiumCtx ctx;
-    void *gdipm;
-} PDF2BITMAP_DATA;
+#include "pdf2bitmap.h"
 
 HRESULT pdf2bitmap_init(PDF2BITMAP_DATA* data)
 {
@@ -48,6 +42,7 @@ HRESULT pdf2bitmap(PDF2BITMAP_DATA* data, const WCHAR *pdf_filename, HBITMAP *ph
     INT bitmap_width, bitmap_height;
 
     *phBitmap = NULL;
+    data->page_count = 0;
 
     hFind = FindFirstFileW(pdf_filename, &find);
     if (hFind == INVALID_HANDLE_VALUE)
@@ -83,9 +78,7 @@ HRESULT pdf2bitmap(PDF2BITMAP_DATA* data, const WCHAR *pdf_filename, HBITMAP *ph
     pdf_size = find.nFileSizeLow;
 #endif
 
-    hr = E_FAIL;
-    if (PDF_PageToHBITMAP(ctx, pView, pdf_size, page_index, dpi, phBitmap, &bitmap_width, &bitmap_height, password))
-        hr = S_OK;
+    hr = PDF_PageToHBITMAP(ctx, pView, pdf_size, page_index, dpi, phBitmap, &data->page_count, password);
 
 cleanup:
     if (pView)

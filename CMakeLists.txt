@@ -32,7 +32,7 @@ target_link_libraries(pdf_load gdi32 shlwapi)
 # libpdf2bitmap.a
 add_library(pdf2bitmap STATIC pdf2bitmap.c)
 target_include_directories(pdf2bitmap INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(pdf2bitmap gdi32 pdf_load)
+target_link_libraries(pdf2bitmap gdi32 pdf_load libgdipm)
 
 if(NOT PDF2IMG_NO_TESTS)
     # pdf2img.exe

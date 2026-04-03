@@ -79,15 +79,14 @@ typedef struct {
 BOOL Pdfium_Load(PdfiumCtx* ctx, const TCHAR* dllPath);
 void Pdfium_Unload(PdfiumCtx* ctx);
 
-BOOL PDF_PageToHBITMAP(
+HRESULT PDF_PageToHBITMAP(
     PdfiumCtx*  ctx,
     const void *pdf_memory,
     size_t      pdf_byte_size,
     int         pageIndex,
     int         dpi,
     HBITMAP*    phBitmap,
-    int*        pWidth,
-    int*        pHeight,
+    int*        page_count,
     const char* password);
 
 #ifdef __cplusplus

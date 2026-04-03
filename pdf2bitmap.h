@@ -14,6 +14,7 @@ typedef struct PDF2BITMAP_DATA
 {
     PdfiumCtx ctx;
     void *gdipm;
+    int page_count;
 } PDF2BITMAP_DATA;
 
 HRESULT pdf2bitmap_init(PDF2BITMAP_DATA* data);

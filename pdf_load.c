@@ -83,33 +83,31 @@ void Pdfium_Unload(PdfiumCtx* ctx)
     ctx->hDll = NULL;
 }
 
-BOOL PDF_PageToHBITMAP(
+HRESULT PDF_PageToHBITMAP(
     PdfiumCtx*  ctx,
     const void *pdf_memory,
     size_t      pdf_byte_size,
     int         pageIndex,
     int         dpi,
     HBITMAP*    phBitmap,
-    int*        pWidth,
-    int*        pHeight,
+    int*        page_count,
     const char* password)
 {
-    FPDF_DOCUMENT doc    = NULL;
-    FPDF_PAGE     page   = NULL;
-    FPDF_BITMAP   fpBmp  = NULL;
-    HBITMAP       hBmp   = NULL;
-    BOOL          result = FALSE;
+    FPDF_DOCUMENT doc = NULL;
+    FPDF_PAGE page = NULL;
+    FPDF_BITMAP fpBmp = NULL;
+    HBITMAP hBmp = NULL;
     double pageW_pt, pageH_pt;
     int width, height;
-	int pageCount;
     int renderFlags = FPDF_ANNOT | FPDF_LCD_TEXT;
     void* pSrc;
     int y, stride;
     BITMAPINFO bmi;
     void* pDst = NULL;
+    HRESULT hr = S_OK;
 
     if (!ctx || !pdf_memory || !pdf_byte_size || !phBitmap)
-        return FALSE;
+        return E_INVALIDARG;
 
     *phBitmap = NULL;
 
@@ -117,21 +115,23 @@ BOOL PDF_PageToHBITMAP(
     if (!doc)
     {
         unsigned long err = ctx->GetLastError ? ctx->GetLastError() : 0;
+        if (err == 4) // FPDF_ERR_PASSWORD
+            return E_ACCESSDENIED;
+
         fprintf(stderr, "[PDFium] Cannot open document (err=%lu)\n", err);
+        hr = E_FAIL;
         goto cleanup;
     }
 
-    pageCount = ctx->GetPageCount(doc);
-    if (pageIndex < 0 || pageIndex >= pageCount)
-    {
-        fprintf(stderr, "[PDFium] Page number was out of range: %d / %d\n", pageIndex, pageCount);
-        goto cleanup;
-    }
+    *page_count = ctx->GetPageCount(doc);
+    if (pageIndex < 0 || pageIndex >= *page_count)
+        pageIndex = 0;
 
     page = ctx->LoadPage(doc, pageIndex);
     if (!page)
     {
         fprintf(stderr, "[PDFium] Failed to load page: %d\n", pageIndex);
+        hr = E_FAIL;
         goto cleanup;
     }
 
@@ -142,6 +142,7 @@ BOOL PDF_PageToHBITMAP(
     if (width <= 0 || height <= 0)
     {
         fprintf(stderr, "[PDFium] width or height was not positive\n");
+        hr = E_UNEXPECTED;
         goto cleanup;
     }
 
@@ -149,6 +150,7 @@ BOOL PDF_PageToHBITMAP(
     if (!fpBmp)
     {
         fprintf(stderr, "[PDFium] FPDFBitmap_Create failed\n");
+        hr = E_OUTOFMEMORY;
         goto cleanup;
     }
 
@@ -170,6 +172,7 @@ BOOL PDF_PageToHBITMAP(
     if (!hBmp || !pDst)
     {
         fprintf(stderr, "[Win32] CreateDIBSection failed (error=%lu)\n", GetLastError());
+        hr = E_OUTOFMEMORY;
         goto cleanup;
     }
 
@@ -184,13 +187,7 @@ BOOL PDF_PageToHBITMAP(
 
     *phBitmap = hBmp;
     hBmp = NULL;
-
-    if (pWidth)
-        *pWidth = width;
-    if (pHeight)
-        *pHeight = height;
-
-    result = TRUE;
+    hr = S_OK;
 
 cleanup:
     if (hBmp)
@@ -201,5 +198,5 @@ cleanup:
         ctx->ClosePage(page);
     if (doc)
         ctx->CloseDocument(doc);
-    return result;
+    return hr;
 }
