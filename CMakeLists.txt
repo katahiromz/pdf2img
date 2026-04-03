@@ -5,16 +5,13 @@
 cmake_minimum_required(VERSION 3.10)
 
 # project name, version, and languages
-project(pdf2img VERSION 0.0 LANGUAGES C)
+project(pdf2img VERSION 1.0 LANGUAGES C)
 
 # project version macro
 add_definitions(-DPDF2IMG_VERSION="${pdf2img_VERSION}")
 
 # Don't use DPI?
-option(GDIPM_NO_DPI "Don't use DPI (dots per inch)" ON)
-if(GDIPM_NO_DPI)
-    add_definitions(-DGDIPM_NO_DPI)
-endif()
+set(GDIPM_NO_DPI ON)
 
 # "Don't make test program?" Option
 option(PDF2IMG_NO_TESTS "Don't create test programs" ON)
@@ -42,3 +39,6 @@ if(NOT PDF2IMG_NO_TESTS)
     add_executable(pdf2img main.c)
     target_link_libraries(pdf2img libgdipm pdf2bitmap)
 endif()
+
+# display status
+message(STATUS "PDF2IMG_NO_TESTS = ${PDF2IMG_NO_TESTS}")
