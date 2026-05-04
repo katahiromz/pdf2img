@@ -91,6 +91,25 @@ typedef struct ImageCodecInfo
     const BYTE *SigMask;
 } ImageCodecInfo;
 
+/* PixelFormat / LockBits 関連 ------------------------------------------------*/
+typedef struct BitmapData
+{
+    UINT     Width;
+    UINT     Height;
+    INT      Stride;
+    INT      PixelFormat;
+    VOID    *Scan0;
+    UINT_PTR Reserved;
+} BitmapData;
+
+typedef struct GpRectI
+{
+    INT X, Y, Width, Height;
+} GpRectI;
+
+#define PixelFormat32bppARGB  0x0026200A   /* non-premultiplied ARGB */
+#define ImageLockModeRead     0x0001
+
 typedef GpStatus (WINAPI *FN_GdiplusStartup)(ULONG_PTR *, const struct GdiplusStartupInput *, struct GdiplusStartupOutput *);
 typedef void (WINAPI *FN_GdiplusShutdown)(ULONG_PTR);
 typedef GpStatus (WINAPI *FN_GdipCreateBitmapFromFile)(const WCHAR *, GpBitmap **);
@@ -99,6 +118,10 @@ typedef GpStatus (WINAPI *FN_GdipDisposeImage)(GpImage *);
 typedef GpStatus (WINAPI *FN_GdipCreateBitmapFromHBITMAP)(HBITMAP, HPALETTE, GpBitmap **);
 typedef GpStatus (WINAPI *FN_GdipSaveImageToFile)(GpImage *, const WCHAR *, const CLSID *, const EncoderParameters *);
 typedef GpStatus (WINAPI *FN_GdipDisposeImage)(GpImage *);
+typedef GpStatus (WINAPI *FN_GdipGetImageWidth)(GpImage *, UINT *);
+typedef GpStatus (WINAPI *FN_GdipGetImageHeight)(GpImage *, UINT *);
+typedef GpStatus (WINAPI *FN_GdipBitmapLockBits)(GpBitmap *, const GpRectI *, UINT, INT, BitmapData *);
+typedef GpStatus (WINAPI *FN_GdipBitmapUnlockBits)(GpBitmap *, BitmapData *);
 #ifndef GDIPM_NO_DPI
 typedef GpStatus (WINAPI *FN_GdipGetImageHorizontalResolution)(GpImage *, REAL *);
 typedef GpStatus (WINAPI *FN_GdipGetImageVerticalResolution)(GpImage *, REAL *);
@@ -125,6 +148,10 @@ typedef struct gdipm_t
     FN_GdipGetImageVerticalResolution m_GdipGetImageVerticalResolution;
     FN_GdipBitmapSetResolution m_GdipBitmapSetResolution;
 #endif
+    FN_GdipGetImageWidth m_GdipGetImageWidth;
+    FN_GdipGetImageHeight m_GdipGetImageHeight;
+    FN_GdipBitmapLockBits m_GdipBitmapLockBits;
+    FN_GdipBitmapUnlockBits m_GdipBitmapUnlockBits;
     FN_GdipGetImageEncodersSize m_GdipGetImageEncodersSize;
     FN_GdipGetImageEncoders m_GdipGetImageEncoders;
     UINT m_num_encoder;
@@ -161,6 +188,10 @@ static GpStatus gdipm_init(gdipm_t *gdipm)
     GET_PROC(GdipDisposeImage);
     GET_PROC(GdipCreateBitmapFromHBITMAP);
     GET_PROC(GdipSaveImageToFile);
+    GET_PROC(GdipGetImageWidth);
+    GET_PROC(GdipGetImageHeight);
+    GET_PROC(GdipBitmapLockBits);
+    GET_PROC(GdipBitmapUnlockBits);
 #ifndef GDIPM_NO_DPI
     GET_PROC(GdipGetImageHorizontalResolution);
     GET_PROC(GdipGetImageVerticalResolution);
@@ -217,36 +248,103 @@ HBITMAP gdipm_load_pic(void *gdipm, const WCHAR *image_filename, ARGB back_color
 )
 {
     gdipm_t *p = gdipm;
-    HBITMAP hbm = NULL;
-    GpBitmap *pBitmap = NULL;
-    GpStatus status;
+    GpBitmap   *pBitmap = NULL;
+    BitmapData  bdata;
+    GpRectI     rect;
+    BITMAPINFOHEADER bih;
+    HBITMAP     hbm = NULL;
+    VOID       *pvBits = NULL;
+    HDC         hDC;
+    UINT        width, height, y;
+    GpStatus    status;
+
+    (void)back_color; /* αチャンネル付きで返すため背景色は使用しない */
 
     if (p->m_GdipCreateBitmapFromFile(image_filename, &pBitmap) != Ok)
         return NULL;
 
-    status = p->m_GdipCreateHBITMAPFromBitmap(pBitmap, &hbm, back_color);
+    /* ---- 画像サイズ取得 -------------------------------------------- */
+    if (p->m_GdipGetImageWidth(pBitmap, &width)   != Ok ||
+        p->m_GdipGetImageHeight(pBitmap, &height) != Ok ||
+        width == 0 || height == 0)
+    {
+        p->m_GdipDisposeImage(pBitmap);
+        return NULL;
+    }
 
 #ifndef GDIPM_NO_DPI
+    /* ---- DPI 取得 -------------------------------------------------- */
     if (x_dpi)
         p->m_GdipGetImageHorizontalResolution(pBitmap, x_dpi);
     if (y_dpi)
         p->m_GdipGetImageVerticalResolution(pBitmap, y_dpi);
-
     if (x_dpi || y_dpi)
     {
-        HDC hDC = GetDC(NULL);
+        HDC hScreenDC = GetDC(NULL);
         if (x_dpi && *x_dpi <= 0)
-            *x_dpi = (float)GetDeviceCaps(hDC, LOGPIXELSX);
+            *x_dpi = (float)GetDeviceCaps(hScreenDC, LOGPIXELSX);
         if (y_dpi && *y_dpi <= 0)
-            *y_dpi = (float)GetDeviceCaps(hDC, LOGPIXELSY);
-        ReleaseDC(NULL, hDC);
+            *y_dpi = (float)GetDeviceCaps(hScreenDC, LOGPIXELSY);
+        ReleaseDC(NULL, hScreenDC);
     }
 #endif
 
-    if (pBitmap)
-        p->m_GdipDisposeImage(pBitmap);
+    /* ---- 32bpp top-down DIB Section を作成 ------------------------- */
+    ZeroMemory(&bih, sizeof(bih));
+    bih.biSize        = sizeof(bih);
+    bih.biWidth       = (LONG)width;
+    bih.biHeight      = -(LONG)height;  /* top-down */
+    bih.biPlanes      = 1;
+    bih.biBitCount    = 32;
+    bih.biCompression = BI_RGB;
 
-    return (status == Ok) ? hbm : NULL;
+    hDC = GetDC(NULL);
+    hbm = CreateDIBSection(hDC, (BITMAPINFO *)&bih, DIB_RGB_COLORS, &pvBits, NULL, 0);
+    ReleaseDC(NULL, hDC);
+
+    if (!hbm || !pvBits)
+    {
+        p->m_GdipDisposeImage(pBitmap);
+        return NULL;
+    }
+
+    /* ---- GDI+ から ARGB ピクセルをそのまま DIB Section へコピー ----------
+     *
+     *  GDI+ PixelFormat32bppARGB のメモリ配置: [B][G][R][A] (little-endian)
+     *  DIB 32bpp のメモリ配置:                [B][G][R][reserved]
+     *
+     *  事前乗算 (pre-multiply) は呼び出し側 (karasunpo.cpp) で
+     *  ii_premultiply() を使って行う。
+     * -------------------------------------------------------------------- */
+    rect.X      = rect.Y = 0;
+    rect.Width  = (INT)width;
+    rect.Height = (INT)height;
+    ZeroMemory(&bdata, sizeof(bdata));
+
+    status = p->m_GdipBitmapLockBits(pBitmap, &rect,
+                                      ImageLockModeRead,
+                                      PixelFormat32bppARGB, &bdata);
+    if (status == Ok)
+    {
+        const UINT row_bytes = width * 4;
+
+        for (y = 0; y < height; y++)
+        {
+            const BYTE *src = (const BYTE *)bdata.Scan0 + (INT_PTR)bdata.Stride * y;
+            BYTE       *dst = (BYTE *)pvBits + row_bytes * y;
+            CopyMemory(dst, src, row_bytes);
+        }
+
+        p->m_GdipBitmapUnlockBits(pBitmap, &bdata);
+    }
+    else
+    {
+        DeleteObject(hbm);
+        hbm = NULL;
+    }
+
+    p->m_GdipDisposeImage(pBitmap);
+    return hbm;
 }
 
 static HRESULT
